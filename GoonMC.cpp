@@ -3,15 +3,16 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winhttp.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <ctype.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdint>
+#include <cctype>
 #include <new>
+#include <utility>
 #pragma comment(lib, "winhttp.lib")
 
-static const size_t NPOS = (size_t)-1;
+inline constexpr size_t NPOS = static_cast<size_t>(-1);
 
 struct Str {
     char*  p;
@@ -84,7 +85,7 @@ struct Str {
         if (pos) t.append(p, pos);
         t.append(rep, rl);
         if (pos + rlen <= n) t.append(p + pos + rlen, n - pos - rlen);
-        *this = (Str&&)t;
+        *this = std::move(t);
     }
     void to_lower() { for (size_t i = 0; i < n; ++i) p[i] = (char)tolower((uint8_t)p[i]); }
     bool ends_with(const char* s) const {
@@ -160,11 +161,10 @@ struct Vec {
         size_t nc = cap ? cap * 2 : 4;
         if (nc < c) nc = c;
         p = (T*)realloc(p, nc * sizeof(T));
-        for (size_t i = cap; i < nc; ++i) new (&p[i]) T();
         cap = nc;
     }
-    void push_back(const T& v) { reserve(n + 1); p[n++] = v; }
-    void push_back(T&& v)      { reserve(n + 1); p[n++] = (T&&)v; }
+    void push_back(const T& v) { reserve(n + 1); new (&p[n]) T(v);            ++n; }
+    void push_back(T&& v)      { reserve(n + 1); new (&p[n]) T(std::move(v)); ++n; }
     T& back()                       { return p[n-1]; }
     const T& back() const           { return p[n-1]; }
     T& operator[](size_t i)         { return p[i]; }
@@ -184,7 +184,7 @@ struct JVal {
     Str*   obj_keys; JVal*  obj_vals; size_t obj_n, obj_cap;
 
     JVal() : type(Null_), bval(false), nval(0), arr(nullptr), arr_n(0), arr_cap(0), obj_keys(nullptr), obj_vals(nullptr), obj_n(0), obj_cap(0) {}
-    JVal(JVal&& o) noexcept : type(o.type), bval(o.bval), nval(o.nval), sval((Str&&)o.sval),
+    JVal(JVal&& o) noexcept : type(o.type), bval(o.bval), nval(o.nval), sval(std::move(o.sval)),
                               arr(o.arr), arr_n(o.arr_n), arr_cap(o.arr_cap),
                               obj_keys(o.obj_keys), obj_vals(o.obj_vals), obj_n(o.obj_n), obj_cap(o.obj_cap) {
         o.type = Null_; o.arr = nullptr; o.obj_keys = nullptr; o.obj_vals = nullptr;
@@ -206,7 +206,7 @@ struct JVal {
     JVal& operator=(JVal&& o) noexcept {
         if (this != &o) {
             this->~JVal();
-            type = o.type; bval = o.bval; nval = o.nval; sval = (Str&&)o.sval;
+            type = o.type; bval = o.bval; nval = o.nval; sval = std::move(o.sval);
             arr = o.arr; arr_n = o.arr_n; arr_cap = o.arr_cap;
             obj_keys = o.obj_keys; obj_vals = o.obj_vals; obj_n = o.obj_n; obj_cap = o.obj_cap;
             o.type = Null_; o.arr = nullptr; o.obj_keys = nullptr; o.obj_vals = nullptr;
@@ -265,7 +265,7 @@ struct JVal {
             for (size_t i = arr_cap; i < nc; ++i) new (&arr[i]) JVal();
             arr_cap = nc;
         }
-        arr[arr_n++] = (JVal&&)v;
+        arr[arr_n++] = std::move(v);
     }
     void push_obj_kv(Str k, JVal v) {
         if (obj_n >= obj_cap) {
@@ -278,8 +278,8 @@ struct JVal {
             }
             obj_cap = nc;
         }
-        obj_keys[obj_n] = (Str&&)k;
-        obj_vals[obj_n] = (JVal&&)v;
+        obj_keys[obj_n] = std::move(k);
+        obj_vals[obj_n] = std::move(v);
         ++obj_n;
     }
 };
@@ -325,7 +325,7 @@ static JVal parse_obj(const char*& p) {
         skip_ws(p);
         if (*p == ':') ++p;
         JVal val = parse_val(p);
-        v.push_obj_kv((Str&&)key, (JVal&&)val);
+        v.push_obj_kv(std::move(key), std::move(val));
         skip_ws(p);
         if (*p == ',') ++p;
     }
@@ -571,6 +571,7 @@ static HINTERNET open_req(const Str& url_s, HINTERNET& out_conn, int max_redir =
             DWORD loc_sz = 0;
             WinHttpQueryHeaders(hReq, WINHTTP_QUERY_LOCATION,
                 WINHTTP_HEADER_NAME_BY_INDEX, nullptr, &loc_sz, WINHTTP_NO_HEADER_INDEX);
+            // Read Location header BEFORE closing the request handle.
             if (loc_sz > 0) {
                 size_t wlen = loc_sz / sizeof(wchar_t) + 2;
                 wchar_t* loc = (wchar_t*)malloc(wlen * sizeof(wchar_t));
@@ -580,8 +581,7 @@ static HINTERNET open_req(const Str& url_s, HINTERNET& out_conn, int max_redir =
                 size_t ln = wcslen(loc);
                 while (ln && loc[ln-1] == 0) --ln;
                 loc[ln] = 0;
-                Str next = to_utf8_str(loc);
-                cur = (Str&&)next;
+                cur = to_utf8_str(loc);
                 free(loc);
             }
             WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn);
@@ -594,7 +594,7 @@ static HINTERNET open_req(const Str& url_s, HINTERNET& out_conn, int max_redir =
     return nullptr;
 }
 
-static Str http_get_str(const Str& url) {
+[[nodiscard]] static Str http_get_str(const Str& url) {
     HINTERNET hConn = nullptr;
     HINTERNET hReq  = open_req(url, hConn);
     Str result{};
@@ -607,7 +607,7 @@ static Str http_get_str(const Str& url) {
     return result;
 }
 
-static CRITICAL_SECTION g_mkdir_cs;
+inline CRITICAL_SECTION g_mkdir_cs;
 
 static bool http_download(const Str& url, const WStr& dest) {
     HINTERNET hConn = nullptr;
@@ -725,7 +725,7 @@ static Config load_config(const WStr& path) {
     Str s = read_file(path);
     if (s.empty()) return c;
     JVal j = parse_json(s);
-    if (j.has("username"))    c.username = (Str&&)Str{}, c.username.assign_s(j["username"].str());
+    if (j.has("username"))    c.username.assign_s(j["username"].str());
     if (j.has("java_path"))   c.java_path.assign_s(j["java_path"].str());
     if (j.has("java_args"))   c.java_args.assign_s(j["java_args"].str());
     if (j.has("ram_gb"))      c.ram_gb      = (int)j["ram_gb"].num();
@@ -750,7 +750,7 @@ static void save_config(const Config& c, const WStr& path) {
     if (n > 0) write_file(path, buf, (size_t)n);
 }
 
-static int g_theme_color = 7;
+inline int g_theme_color = 7;
 
 static void apply_theme() {
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),
@@ -787,21 +787,22 @@ static int cmp_ver(const MCVer& a, const MCVer& b) {
     return 0;
 }
 
+// Pre-computed version sentinels — initialized once at startup, never mutated.
+inline const MCVer MC_VER_117  = parse_mc_ver("1.17");
+inline const MCVer MC_VER_121  = parse_mc_ver("1.21");
+inline const MCVer MC_VER_1205 = parse_mc_ver("1.20.5");
+
 static int required_jdk(const char* mc) {
-    static MCVer v117  = parse_mc_ver("1.17");
-    static MCVer v121  = parse_mc_ver("1.21");
     MCVer v = parse_mc_ver(mc);
-    if (cmp_ver(v, v117) < 0) return 8;
-    if (cmp_ver(v, v121) < 0) return 17;
+    if (cmp_ver(v, MC_VER_117) < 0) return 8;
+    if (cmp_ver(v, MC_VER_121) < 0) return 17;
     return 21;
 }
 
 static const char* get_runtime_component(const char* mc) {
-    static MCVer v117  = parse_mc_ver("1.17");
-    static MCVer v1205 = parse_mc_ver("1.20.5");
     MCVer v = parse_mc_ver(mc);
-    if (cmp_ver(v, v117)  < 0) return "jre-legacy";
-    if (cmp_ver(v, v1205) < 0) return "java-runtime-gamma";
+    if (cmp_ver(v, MC_VER_117)  < 0) return "jre-legacy";
+    if (cmp_ver(v, MC_VER_1205) < 0) return "java-runtime-gamma";
     return "java-runtime-delta";
 }
 
@@ -920,12 +921,12 @@ static bool native_path_matches_arch(const char* p) {
     return true;
 }
 
-static const char* MANIFEST_URL    = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
-static const char* RESOURCES_URL   = "https://resources.download.minecraft.net/";
-static const char* RUNTIME_ALL_URL =
+inline constexpr const char* MANIFEST_URL    = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
+inline constexpr const char* RESOURCES_URL   = "https://resources.download.minecraft.net/";
+inline constexpr const char* RUNTIME_ALL_URL =
     "https://launchermeta.mojang.com/v1/products/java-runtime/"
     "2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
-static const char* FABRIC_META_BASE = "https://meta.fabricmc.net/v2/versions/";
+inline constexpr const char* FABRIC_META_BASE = "https://meta.fabricmc.net/v2/versions/";
 
 static void download_libraries_to_tasks(const WStr& root, const JVal& vj,
                                          Vec<DLTask>& tasks) {
@@ -945,9 +946,9 @@ static void download_libraries_to_tasks(const WStr& root, const JVal& vj,
             if (!base_url.empty() && base_url.back() != '/') base_url.append_c('/');
             base_url.append(path.p, path.n);
             DLTask t{};
-            t.url = (Str&&)base_url;
+            t.url = std::move(base_url);
             t.dest = pjoin(lib_dir, path.c_str());
-            tasks.push_back((DLTask&&)t);
+            tasks.push_back(std::move(t));
             continue;
         }
 
@@ -969,7 +970,7 @@ static void download_libraries_to_tasks(const WStr& root, const JVal& vj,
                     DLTask t{};
                     t.url.assign_s(u);
                     t.dest = pjoin(lib_dir, p);
-                    tasks.push_back((DLTask&&)t);
+                    tasks.push_back(std::move(t));
                 }
             }
         }
@@ -982,7 +983,7 @@ static void download_libraries_to_tasks(const WStr& root, const JVal& vj,
                 DLTask t{};
                 t.url.assign_s(u);
                 t.dest = pjoin(lib_dir, p);
-                tasks.push_back((DLTask&&)t);
+                tasks.push_back(std::move(t));
             }
         }
     }
@@ -1064,7 +1065,7 @@ static bool install_bundled_jre(const WStr& root, Config& cfg, const WStr& cfg_p
         Str es = to_utf8_str(existing.c_str());
         printf("  Found Mojang JRE (%s): %s\n", component, es.c_str());
         if (!check_java(cfg.java_path)) {
-            cfg.java_path = (Str&&)es;
+            cfg.java_path = std::move(es);
             save_config(cfg, cfg_path);
         }
         return true;
@@ -1076,8 +1077,8 @@ static bool install_bundled_jre(const WStr& root, Config& cfg, const WStr& cfg_p
     if (ans.empty() || (ans.p[0] != 'y' && ans.p[0] != 'Y')) return false;
 
     fputs("  Fetching Mojang runtime index...\n", stdout);
-    Str all_str = http_get_str(Str{} = {}), url{}; url.assign_s(RUNTIME_ALL_URL);
-    all_str = http_get_str(url);
+    Str url{}; url.assign_s(RUNTIME_ALL_URL);
+    Str all_str = http_get_str(url);
     if (all_str.empty()) { fputs("  Failed to fetch runtime index.\n", stderr); return false; }
     JVal all_j = parse_json(all_str);
 
@@ -1119,8 +1120,8 @@ static bool install_bundled_jre(const WStr& root, Config& cfg, const WStr& cfg_p
 
         DLTask t{};
         t.url.assign_s(dl_url);
-        t.dest = (WStr&&)rel;
-        tasks.push_back((DLTask&&)t);
+        t.dest = std::move(rel);
+        tasks.push_back(std::move(t));
     }
 
     printf("  Downloading %zu JRE files...\n", tasks.n);
@@ -1135,7 +1136,7 @@ static bool install_bundled_jre(const WStr& root, Config& cfg, const WStr& cfg_p
 
     Str found_s = to_utf8_str(found.c_str());
     printf("  Mojang JRE (%s) installed: %s\n", component, found_s.c_str());
-    cfg.java_path = (Str&&)found_s;
+    cfg.java_path = std::move(found_s);
     save_config(cfg, cfg_path);
     return true;
 }
@@ -1182,8 +1183,8 @@ static bool download_assets(const WStr& root, const JVal& vj) {
         t.url.append_s(pfx);
         t.url.append_c('/');
         t.url.append_s(hash);
-        t.dest = (WStr&&)dest;
-        tasks.push_back((DLTask&&)t);
+        t.dest = std::move(dest);
+        tasks.push_back(std::move(t));
     }
 
     printf("  Fetching %zu assets (%zu already cached)...\n",
@@ -1324,7 +1325,7 @@ struct VarMap {
         KVPair p{};
         p.key.append(k, kl);
         p.val.assign_s(v);
-        pairs.push_back((KVPair&&)p);
+        pairs.push_back(std::move(p));
     }
     const Str* get(const char* k, size_t kl) const {
         for (size_t i = 0; i < pairs.n; ++i)
@@ -1427,15 +1428,15 @@ static Str build_classpath(const WStr& root, const JVal& vj, const JVal& parent_
             bool found = false;
             for (size_t k = 0; k < entries.n; ++k) {
                 if (entries.p[k].ga_key.eq(ga.c_str())) {
-                    entries.p[k].full_path = (Str&&)full;
+                    entries.p[k].full_path = std::move(full);
                     found = true; break;
                 }
             }
             if (!found) {
                 CPEntry e{};
-                e.ga_key = (Str&&)ga;
-                e.full_path = (Str&&)full;
-                entries.push_back((CPEntry&&)e);
+                e.ga_key = std::move(ga);
+                e.full_path = std::move(full);
+                entries.push_back(std::move(e));
             }
         }
     };
@@ -1450,7 +1451,7 @@ static Str build_classpath(const WStr& root, const JVal& vj, const JVal& parent_
     }
     Str jar_name{}; jar_name.assign_s(jar_ver); jar_name.append_s(".jar");
     WStr main_jar = pjoin(pjoin(pjoin(root, "versions"), jar_ver), jar_name.c_str());
-    cp.append(path_to_str(main_jar).p, path_to_str(main_jar).n);
+    { Str main_jar_s = path_to_str(main_jar); cp.append(main_jar_s.p, main_jar_s.n); }
     return cp;
 }
 
@@ -1519,8 +1520,8 @@ static bool launch_version(const WStr& root, const Config& cfg, const char* vers
 
     char ram_buf[32];
     snprintf(ram_buf, sizeof(ram_buf), "-Xmx%dG", cfg.ram_gb);
-    Str ram_arg{}; ram_arg.assign_s(ram_buf); args.push_back((Str&&)ram_arg);
-    Str ms_arg{}; ms_arg.assign_s("-Xms512m"); args.push_back((Str&&)ms_arg);
+    Str ram_arg{}; ram_arg.assign_s(ram_buf); args.push_back(std::move(ram_arg));
+    Str ms_arg{}; ms_arg.assign_s("-Xms512m"); args.push_back(std::move(ms_arg));
 
     if (!cfg.java_args.empty()) {
         const char* p = cfg.java_args.c_str();
@@ -1530,14 +1531,14 @@ static bool launch_version(const WStr& root, const Config& cfg, const char* vers
             const char* start = p;
             while (*p && *p != ' ' && *p != '\t') ++p;
             Str tok{}; tok.append(start, p - start);
-            args.push_back((Str&&)tok);
+            args.push_back(std::move(tok));
         }
     }
 
     if (required_jdk(base_ver.c_str()) <= 8) {
-        Str a{}; a.assign_s("-XX:+UseConcMarkSweepGC"); args.push_back((Str&&)a);
-        a.assign_s("-XX:+CMSIncrementalMode"); args.push_back((Str&&)a);
-        a.assign_s("-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump"); args.push_back((Str&&)a);
+        Str a{}; a.assign_s("-XX:+UseConcMarkSweepGC"); args.push_back(std::move(a));
+        a.assign_s("-XX:+CMSIncrementalMode"); args.push_back(std::move(a));
+        a.assign_s("-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump"); args.push_back(std::move(a));
     } else {
         const char* gc_args[] = {
             "-XX:+UseG1GC", "-XX:+UnlockExperimentalVMOptions",
@@ -1545,7 +1546,7 @@ static bool launch_version(const WStr& root, const Config& cfg, const char* vers
             "-XX:MaxGCPauseMillis=50", "-XX:G1HeapRegionSize=32M"
         };
         for (int i = 0; i < 6; ++i) {
-            Str a{}; a.assign_s(gc_args[i]); args.push_back((Str&&)a);
+            Str a{}; a.assign_s(gc_args[i]); args.push_back(std::move(a));
         }
     }
 
@@ -1556,7 +1557,7 @@ static bool launch_version(const WStr& root, const Config& cfg, const char* vers
             const JVal& e = arr.arr[i];
             if (e.is_string()) {
                 Str a = tok_replace(e.str(), strlen(e.str()), vars);
-                args.push_back((Str&&)a);
+                args.push_back(std::move(a));
                 continue;
             }
             if (!e.is_object()) continue;
@@ -1574,11 +1575,11 @@ static bool launch_version(const WStr& root, const Config& cfg, const char* vers
             const JVal& val = e["value"];
             if (val.is_string()) {
                 Str a = tok_replace(val.str(), strlen(val.str()), vars);
-                args.push_back((Str&&)a);
+                args.push_back(std::move(a));
             } else if (val.is_array()) {
                 for (size_t vi = 0; vi < val.arr_n; ++vi) {
                     Str a = tok_replace(val.arr[vi].str(), strlen(val.arr[vi].str()), vars);
-                    args.push_back((Str&&)a);
+                    args.push_back(std::move(a));
                 }
             }
         }
@@ -1590,16 +1591,16 @@ static bool launch_version(const WStr& root, const Config& cfg, const char* vers
         size_t orig = args.n;
         collect_args(base_vj, "jvm");
         if (has_parent) collect_args(vj, "jvm");
-        args.push_back((Str&&)main_cls_s);
+        args.push_back(std::move(main_cls_s));
         collect_args(base_vj, "game");
     } else {
         Str a{};
-        a.assign_s("-Djava.library.path="); a.append(nat_path.p, nat_path.n); args.push_back((Str&&)a);
-        a.assign_s("-Dorg.lwjgl.librarypath="); a.append(nat_path.p, nat_path.n); args.push_back((Str&&)a);
-        a.assign_s("-Dfile.encoding=UTF-8"); args.push_back((Str&&)a);
-        a.assign_s("-cp"); args.push_back((Str&&)a);
-        args.push_back((Str&&)cp);
-        args.push_back((Str&&)main_cls_s);
+        a.assign_s("-Djava.library.path="); a.append(nat_path.p, nat_path.n); args.push_back(std::move(a));
+        a.assign_s("-Dorg.lwjgl.librarypath="); a.append(nat_path.p, nat_path.n); args.push_back(std::move(a));
+        a.assign_s("-Dfile.encoding=UTF-8"); args.push_back(std::move(a));
+        a.assign_s("-cp"); args.push_back(std::move(a));
+        args.push_back(std::move(cp));
+        args.push_back(std::move(main_cls_s));
         const char* mc_args = base_vj["minecraftArguments"].str();
         const char* p = mc_args;
         while (p && *p) {
@@ -1609,7 +1610,7 @@ static bool launch_version(const WStr& root, const Config& cfg, const char* vers
             while (*p && *p != ' ') ++p;
             Str tok{}; tok.append(start, p - start);
             Str replaced = tok_replace_str(tok, vars);
-            args.push_back((Str&&)replaced);
+            args.push_back(std::move(replaced));
         }
     }
 
@@ -1692,7 +1693,7 @@ static Vec<Str> get_installed_versions(const WStr& root) {
 
         Str jar_name{}; jar_name.copy_from(name); jar_name.append_s(".jar");
         WStr jar = pjoin(entry_dir, jar_name.c_str());
-        if (path_exists(jar) && path_file_size(jar) > 1024) { v.push_back((Str&&)name); continue; }
+        if (path_exists(jar) && path_file_size(jar) > 1024) { v.push_back(std::move(name)); continue; }
 
         Str js = read_file(json_p);
         if (js.empty()) continue;
@@ -1702,7 +1703,7 @@ static Vec<Str> get_installed_versions(const WStr& root) {
             Str bjar_name{}; bjar_name.assign_s(base); bjar_name.append_s(".jar");
             WStr base_jar = pjoin(pjoin(ver_dir, base), bjar_name.c_str());
             if (path_exists(base_jar) && path_file_size(base_jar) > 1024)
-                v.push_back((Str&&)name);
+                v.push_back(std::move(name));
         }
     } while (FindNextFileW(h, &fd));
     FindClose(h);
@@ -1749,7 +1750,7 @@ static void section_download(const WStr& root, Config& cfg, const WStr& cfg_path
             VE e{};
             e.id.assign_s(fv.arr[i]["version"].str());
             e.type.assign_s(fv.arr[i]["stable"].bval ? "release" : "snapshot");
-            entries.push_back((VE&&)e);
+            entries.push_back(std::move(e));
         }
         fputs("Fetching Mojang manifest (needed for base download)...\n", stdout);
         Str mu{}; mu.assign_s(MANIFEST_URL);
@@ -1769,7 +1770,7 @@ static void section_download(const WStr& root, Config& cfg, const WStr& cfg_path
             VE e{};
             e.id.assign_s(manifest["versions"].arr[i]["id"].str());
             e.type.assign_s(manifest["versions"].arr[i]["type"].str());
-            entries.push_back((VE&&)e);
+            entries.push_back(std::move(e));
         }
     }
 
@@ -1782,7 +1783,7 @@ static void section_download(const WStr& root, Config& cfg, const WStr& cfg_path
     for (size_t i = 0; i < entries.n; ++i)
         if (!releases_only || entries.p[i].type.eq("release")) {
             VE e{}; e.id.copy_from(entries.p[i].id); e.type.copy_from(entries.p[i].type);
-            filtered.push_back((VE&&)e);
+            filtered.push_back(std::move(e));
         }
 
     int page = 0;
@@ -1870,7 +1871,7 @@ static void section_settings(Config& cfg, const WStr& cfg_path) {
         if (input.eq("1")) {
             printf("New username [%s]: ", cfg.username.c_str());
             Str val = read_line();
-            if (!val.empty()) cfg.username = (Str&&)val;
+            if (!val.empty()) cfg.username = std::move(val);
         } else if (input.eq("2")) {
             printf("RAM in GB [%d]: ", cfg.ram_gb);
             Str val = read_line();
@@ -1884,13 +1885,13 @@ static void section_settings(Config& cfg, const WStr& cfg_path) {
             Str val = read_line();
             if (!val.empty()) {
                 if (!check_java(val)) fputs("Warning: could not verify java at that path.\n", stdout);
-                cfg.java_path = (Str&&)val;
+                cfg.java_path = std::move(val);
             }
         } else if (input.eq("4")) {
             printf("Extra Java args (space-separated) [%s]: ",
                    cfg.java_args.empty() ? "none" : cfg.java_args.c_str());
             Str val = read_line();
-            cfg.java_args = (Str&&)val;
+            cfg.java_args = std::move(val);
         } else if (input.eq("5")) {
             cfg.hide_launcher = !cfg.hide_launcher;
         } else if (input.eq("6")) {
@@ -1905,7 +1906,7 @@ static void section_settings(Config& cfg, const WStr& cfg_path) {
 
 static void section_themes(Config& cfg, const WStr& cfg_path) {
     struct ThemeEntry { const char* name; int color; };
-    static const ThemeEntry themes[] = {
+    static constexpr ThemeEntry themes[] = {
         { "White (Default)", 15 },
         { "Cyan",            11 },
         { "Green",           10 },
@@ -1915,7 +1916,7 @@ static void section_themes(Config& cfg, const WStr& cfg_path) {
         { "Light Blue",       9 },
         { "Gray",             8 },
     };
-    static const int NUM_THEMES = (int)(sizeof(themes) / sizeof(themes[0]));
+    constexpr int NUM_THEMES = static_cast<int>(sizeof(themes) / sizeof(themes[0]));
 
     for (;;) {
         print_header("THEMES");
@@ -2043,7 +2044,7 @@ int main() {
     if (cfg.username.empty() || cfg.username.eq("Player")) {
         fputs("=== GoonMC by TryFast ===\n\nEnter your username: ", stdout);
         Str uname = read_line();
-        if (!uname.empty()) cfg.username = (Str&&)uname;
+        if (!uname.empty()) cfg.username = std::move(uname);
         if (cfg.username.empty()) cfg.username.assign_s("Player");
         save_config(cfg, cfg_path);
     }
