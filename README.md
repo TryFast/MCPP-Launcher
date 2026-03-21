@@ -3,7 +3,8 @@
 </p>
 
 <div align="center">
-# MC++ 
+
+  # MC++ 
 
 A lightweight command line Minecraft launcher for Windows, written purely in C++.
 
