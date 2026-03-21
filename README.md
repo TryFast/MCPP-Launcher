@@ -1,8 +1,21 @@
-# MC++
+<p align="center">
+<img src="https://mcppp.vercel.app/icon.png" alt="mcpp-logo" width="15%"/>
+</p>
+
+# MC++ 
 
 A lightweight command line Minecraft launcher for Windows, written purely in C++.
 
-No Bloat. No Java launcher overhead. Just a single lightweight portable `.exe` that downloads, manages, and launches Minecraft straight out of the box.
+<div align="center">
+  <img src="https://img.shields.io/github/v/release/TryFast/MCPP-Launcher" alt="Latest Release"/>
+  <img src="https://img.shields.io/github/downloads/TryFast/MCPP-Launcher/total" alt="Total Downloads"/>
+  <img src="https://img.shields.io/github/stars/TryFast/MCPP-Launcher" alt="Stars"/>
+  <img src="https://img.shields.io/github/languages/code-size/TryFast/MCPP-Launcher" alt="GitHub code size in bytes"/>
+  <img src="https://img.shields.io/badge/platform-Windows-blue?logo=windows" alt="Platform"/>
+  <img src="https://img.shields.io/badge/language-C%2B%2B-blue?logo=cplusplus" alt="C++"/>
+</div>
+
+**No Bloat. No Java launcher overhead. Just a single lightweight portable `.exe` that downloads, manages, and launches Minecraft straight out of the box.**
 
 Download the latest release from the [Releases](../../releases/latest) page.
 or
