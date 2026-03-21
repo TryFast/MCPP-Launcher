@@ -49,7 +49,7 @@ Clone the repo by clicking on the green `Code` button and click on `Download ZIP
 Make sure you have MinGW-w64 installed and `g++` available in your PATH, then run Open CMD and run:
 
 ```batch
-cd path\to\your\folder\where\the\exe\file\is\located
+cd path\to\your\folder\where\the\cpp\file\is\located
 g++ -std=c++17 -O2 -o MCPP.exe MCPP.cpp -lwinhttp
 ```
 
