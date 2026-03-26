@@ -38,14 +38,15 @@ struct Str {
     }
 
     inline void grow(size_t need) {
-        if (n + need <= cap) return;
-        size_t nc = cap ? cap * 2 : 16;
-        if (nc < n + need) nc = n + need;
-        p = (char*)realloc(p, nc + 1);
-        cap = nc;
-    }
-    inline void append(const char* s, size_t l) { if (!l) return; grow(l); memcpy(p + n, s, l); n += l; p[n] = 0; }
-    inline void append_c(char c)                 { grow(1); p[n++] = c; p[n] = 0; }
+    if (n + need <= cap) return;
+    size_t nc = cap ? cap * 2 : 16;
+    if (nc < n + need) nc = n + need;
+    char* tmp = (char*)realloc(p, nc + 1);
+    if (!tmp) return;
+    p = tmp; cap = nc;
+}
+    inline void append(const char* s, size_t l) { if (!l) return; grow(l); if (n + l > cap) return; memcpy(p + n, s, l); n += l; p[n] = 0; }
+    inline void append_c(char c)                 { grow(1); if (n >= cap) return; p[n++] = c; p[n] = 0; }
     inline void append_s(const char* s)          { if (s && *s) append(s, strlen(s)); }
     inline void assign(const char* s, size_t l)  { n = 0; append(s, l); }
     inline void assign_s(const char* s)          { n = 0; if (s) append_s(s); }
@@ -119,14 +120,15 @@ struct WStr {
     }
 
     inline void grow(size_t need) {
-        if (n + need <= cap) return;
-        size_t nc = cap ? cap * 2 : 16;
-        if (nc < n + need) nc = n + need;
-        p = (wchar_t*)realloc(p, (nc + 1) * sizeof(wchar_t));
-        cap = nc;
-    }
-    inline void append(const wchar_t* s, size_t l) { if (!l) return; grow(l); memcpy(p + n, s, l * sizeof(wchar_t)); n += l; p[n] = 0; }
-    inline void append_c(wchar_t c)                { grow(1); p[n++] = c; p[n] = 0; }
+    if (n + need <= cap) return;
+    size_t nc = cap ? cap * 2 : 16;
+    if (nc < n + need) nc = n + need;
+    wchar_t* tmp = (wchar_t*)realloc(p, (nc + 1) * sizeof(wchar_t));
+    if (!tmp) return;
+    p = tmp; cap = nc;
+}
+    inline void append(const wchar_t* s, size_t l) { if (!l) return; grow(l); if (n + l > cap) return; memcpy(p + n, s, l * sizeof(wchar_t)); n += l; p[n] = 0; }
+    inline void append_c(wchar_t c)                { grow(1); if (n >= cap) return; p[n++] = c; p[n] = 0; }
     inline void append_w(const wchar_t* s)         { if (s && *s) append(s, wcslen(s)); }
     inline void assign_w(const wchar_t* s)         { n = 0; append_w(s); }
     inline void copy_from(const WStr& o)           { n = 0; if (o.p && o.n) append(o.p, o.n); }
@@ -161,12 +163,13 @@ struct Vec {
     }
 
     inline void reserve(size_t c) {
-        if (c <= cap) return;
-        size_t nc = cap ? cap * 2 : 4;
-        if (nc < c) nc = c;
-        p = (T*)realloc(p, nc * sizeof(T));
-        cap = nc;
-    }
+    if (c <= cap) return;
+    size_t nc = cap ? cap * 2 : 4;
+    if (nc < c) nc = c;
+    T* tmp = (T*)realloc(p, nc * sizeof(T));
+    if (!tmp) return;
+    p = tmp; cap = nc;
+}
     inline void push_back(const T& v) { reserve(n + 1); new (&p[n++]) T(v); }
     inline void push_back(T&& v)      { reserve(n + 1); new (&p[n++]) T(std::move(v)); }
     inline void pop_back()            { if (n) { --n; p[n].~T(); } }
@@ -251,21 +254,20 @@ struct JVal {
         return nv;
     }
 
-    inline const JVal& operator[](const char* k) const {
-        size_t kl = strlen(k);
-        for (size_t i = 0; i < obj_n; ++i)
-            if (obj_k[i].eq_n(k, kl)) return obj_v[i];
-        return null_ref();
-    }
     inline JVal& operator[](const char* k) {
         size_t kl = strlen(k);
         for (size_t i = 0; i < obj_n; ++i)
             if (obj_k[i].eq_n(k, kl)) return obj_v[i];
-
         if (obj_n >= obj_cap) {
             size_t nc = obj_cap ? obj_cap * 2 : 4;
-            obj_k = (Str*)  realloc(obj_k, nc * sizeof(Str));
-            obj_v = (JVal*) realloc(obj_v, nc * sizeof(JVal));
+            Str*  tk = (Str*)  realloc(obj_k, nc * sizeof(Str));
+            JVal* tv = (JVal*) realloc(obj_v, nc * sizeof(JVal));
+            if (!tk || !tv) {
+                if (tk) obj_k = tk;
+                if (tv) obj_v = tv;
+                return obj_v[obj_n > 0 ? obj_n - 1 : 0];
+            }
+            obj_k = tk; obj_v = tv;
             for (size_t i = obj_cap; i < nc; ++i) { new (&obj_k[i]) Str(); new (&obj_v[i]) JVal(); }
             obj_cap = nc;
         }
@@ -273,23 +275,20 @@ struct JVal {
         return obj_v[obj_n++];
     }
 
-    inline const JVal& operator[](size_t i) const { return arr[i]; }
-    inline JVal&       operator[](size_t i)       { return arr[i]; }
-
-    inline void push_arr_val(JVal v) {
-        if (arr_n >= arr_cap) {
-            size_t nc = arr_cap ? arr_cap * 2 : 4;
-            arr = (JVal*)realloc(arr, nc * sizeof(JVal));
-            for (size_t i = arr_cap; i < nc; ++i) new (&arr[i]) JVal();
-            arr_cap = nc;
-        }
-        arr[arr_n++] = std::move(v);
+    inline const JVal& operator[](const char* k) const {
+        size_t kl = strlen(k);
+        for (size_t i = 0; i < obj_n; ++i)
+            if (obj_k[i].eq_n(k, kl)) return obj_v[i];
+        return null_ref();
     }
+
     inline void push_obj_kv(Str k, JVal v) {
         if (obj_n >= obj_cap) {
             size_t nc = obj_cap ? obj_cap * 2 : 4;
-            obj_k = (Str*)  realloc(obj_k, nc * sizeof(Str));
-            obj_v = (JVal*) realloc(obj_v, nc * sizeof(JVal));
+            Str*  tk = (Str*)  realloc(obj_k, nc * sizeof(Str));
+            JVal* tv = (JVal*) realloc(obj_v, nc * sizeof(JVal));
+            if (!tk || !tv) { if (tk) obj_k = tk; if (tv) obj_v = tv; return; }
+            obj_k = tk; obj_v = tv;
             for (size_t i = obj_cap; i < nc; ++i) { new (&obj_k[i]) Str(); new (&obj_v[i]) JVal(); }
             obj_cap = nc;
         }
@@ -297,9 +296,22 @@ struct JVal {
         obj_v[obj_n] = std::move(v);
         ++obj_n;
     }
+
+    inline void push_arr_val(JVal v) {
+        if (arr_n >= arr_cap) {
+            size_t nc = arr_cap ? arr_cap * 2 : 4;
+            JVal* ta = (JVal*) realloc(arr, nc * sizeof(JVal));
+            if (!ta) return;
+            arr = ta;
+            for (size_t i = arr_cap; i < nc; ++i) new (&arr[i]) JVal();
+            arr_cap = nc;
+        }
+        arr[arr_n++] = std::move(v);
+    }
 };
 
 //json parser
+
 inline void skip_ws(const char*& p) {
     while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
 }
@@ -414,13 +426,6 @@ inline WStr path_join(const WStr& base, const char* comp) {
     if (r.n && r.back() != L'\\') r.append_c(L'\\');
     WStr w = to_wide(comp);
     if (w.p) r.append(w.p, w.n);
-    return r;
-}
-
-inline WStr path_join_w(const WStr& base, const wchar_t* comp) {
-    WStr r; r.copy_from(base);
-    if (r.n && r.back() != L'\\') r.append_c(L'\\');
-    r.append_w(comp);
     return r;
 }
 
@@ -622,7 +627,7 @@ inline Str http_get(const Str& url) {
 }
 
 // guards directory creation across concurrent download threads
-inline CRITICAL_SECTION g_mkdir_cs;
+CRITICAL_SECTION g_mkdir_cs;
 
 inline bool http_download(const Str& url, const WStr& dest) {
     HINTERNET hConn = nullptr, hReq = open_req(url, hConn);
@@ -693,15 +698,19 @@ inline void parallel_dl(Vec<DLTask>& tasks, int nthreads = 16) {
     int n = nthreads < (int)total ? nthreads : (int)total;
     Vec<HANDLE> pool;
     pool.reserve((size_t)n);
-    for (int t = 0; t < n; ++t)
-        pool.push_back(CreateThread(nullptr, 0, dl_worker, &ctx, 0, nullptr));
+    for (int t = 0; t < n; ++t) {
+        HANDLE h = CreateThread(nullptr, 0, dl_worker, &ctx, 0, nullptr);
+        if (h) pool.push_back(h);
+        else   InterlockedExchangeAdd(&ndone, 0);
+    }
 
-    while (ndone < total) {
+    while (ndone < (LONG)pool.n || cursor < total) {
         printf("  %ld/%ld\r", ndone, total);
         fflush(stdout);
         Sleep(100);
     }
-    WaitForMultipleObjects((DWORD)pool.n, pool.p, TRUE, INFINITE);
+    if (!pool.empty())
+        WaitForMultipleObjects((DWORD)pool.n, pool.p, TRUE, INFINITE);
     for (size_t t = 0; t < pool.n; ++t) CloseHandle(pool.p[t]);
     printf("  %ld/%ld\n", total, total);
 }
@@ -1109,7 +1118,7 @@ inline bool install_mc_base(const WStr& root, const char* version,
     WStr ver_jar  = path_join(ver_dir, jar_name.c_str());
     make_dirs(ver_dir);
 
-    if (steps) printf("[2/5] fetching %s version json...\n", version);
+    if (steps) printf("[1/5] fetching %s version json...\n", version);
     Str ver_str;
     if (path_exists(ver_json)) {
         ver_str = read_file(ver_json);
@@ -1121,11 +1130,11 @@ inline bool install_mc_base(const WStr& root, const char* version,
     }
     JVal vj = parse_json(ver_str);
 
-    if (steps) fputs("[3/5] Downloading client jar...\n", stdout);
+    if (steps) fputs("[2/5] Downloading client jar...\n", stdout);
     Str jar_url; jar_url.assign_s(vj["downloads"]["client"]["url"].str());
     if (!download_file(jar_url, ver_jar)) { fputs("failed to download client jar.\n", stderr); return false; }
 
-    if (steps) fputs("[4/5] Downloading libraries...\n", stdout);
+    if (steps) fputs("[3/5] Downloading libraries...\n", stdout);
     Vec<DLTask> lib_tasks;
     collect_lib_tasks(root, vj, lib_tasks);
     parallel_dl(lib_tasks, 16);
@@ -1192,10 +1201,10 @@ inline bool install_fabric(const WStr& root, const char* mc_ver, const JVal& man
     collect_lib_tasks(root, fabric_vj, fabric_tasks);
     parallel_dl(fabric_tasks, 16);
 
-    fputs("[3/5] Extracting fabric natives (if any)...\n", stdout);
+    fputs("[4/5] Extracting fabric natives (if any)...\n", stdout);
     extract_natives(root, mc_ver, fabric_vj);
 
-    fputs("[4/5] (assets already fetched with base mc)\n", stdout);
+    fputs("[5/5] (assets already fetched with base mc)\n", stdout);
     printf("\nfabric install complete: %s\n", fabric_id.c_str());
     return true;
 }
@@ -1820,8 +1829,7 @@ inline void section_download(const WStr& root, Config& cfg, const WStr& cfg_path
                     printf("\ndownload complete! %s is ready.\n", chosen);
             }
         }
-        fputs("press enter to continue...", stdout); getchar();
-        return;
+        fputs("Press enter to continue...", stdout); getchar();
     }
 }
 
@@ -1955,6 +1963,15 @@ inline void section_launch(const WStr& root, Config& cfg, const WStr& cfg_path) 
 
     if (!check_java(cfg.java_path)) {
         printf("\njava not found at: %s\nlocating bundled jre...\n", cfg.java_path.c_str());
+    Str base_ver; base_ver.assign_s(chosen);
+    {
+        Str vjname; vjname.assign_s(chosen); vjname.append_s(".json");
+        WStr vj_path = path_join(path_join(path_join(root, "versions"), chosen), vjname.c_str());
+        if (path_exists(vj_path)) {
+            JVal jv = parse_json(read_file(vj_path));
+            if (jv.has("inheritsFrom")) base_ver.assign_s(jv["inheritsFrom"].str());
+        }
+    }
         if (!install_bundled_jre(root, cfg, cfg_path, base_ver.c_str())) {
             fputs("java unavailable. set java path in settings.\npress enter to continue...", stderr);
             getchar(); return;
