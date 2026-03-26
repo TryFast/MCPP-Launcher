@@ -76,18 +76,6 @@ On first launch you will be asked to enter a username. Everything else is config
 
 Settings are saved to `config.json` in the same folder as the exe.
 
-```json
-{
-  "username": "Player",     //Your name
-  "java_path": "javaw",     //Java path locate to javaw.exe 
-  "java_args": "",          //Custom args for nerds
-  "ram_gb": 2,              //Allocate RAM
-  "theme_color": 7,         //Yay Autism woooohoo
-  "hide_launcher": true,    //true = Launcher turns off after launch and vice versa
-  "show_console": false     //Logs and shi
-}
-```
-
 ---
 
 ## Supported Versions
